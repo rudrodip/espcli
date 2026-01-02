@@ -1,6 +1,6 @@
 {
   "name": "espcli",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Modern CLI for ESP-IDF development — install, create, build, flash, and monitor ESP32 projects",
   "type": "module",
   "scripts": {

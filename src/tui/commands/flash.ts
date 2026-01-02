@@ -1,7 +1,7 @@
 import { flash } from '@/core/operations/flash';
 import { listDevices } from '@/core/operations/devices';
 import { findProjectRoot } from '@/core/services/idf';
-import { loadConfig, updateConfig } from '@/core/services/config';
+import { loadConfig, updateConfig, configExists } from '@/core/services/config';
 import { DEFAULT_FLASH_BAUD } from '@/core/constants';
 import { emitter, createOperationId } from '@/core/emitter';
 import * as prompts from '@/tui/prompts';
@@ -55,10 +55,15 @@ export async function flashCommand(options: FlashOptions): Promise<void> {
   }
 
   if (port !== config.port || baud !== config.flashBaud) {
-    const saveSettings = await prompts.confirm('Save port and baud rate to project config?', true);
-    if (saveSettings) {
+    const hasConfig = await configExists(projectDir);
+    if (hasConfig) {
       await updateConfig(projectDir, { port, flashBaud: baud });
-      logger.dim('Settings saved to espcli.json');
+    } else {
+      const saveSettings = await prompts.confirm('Save port and baud rate to project config?', true);
+      if (saveSettings) {
+        await updateConfig(projectDir, { port, flashBaud: baud });
+        logger.dim('Settings saved to .espcli');
+      }
     }
   }
 
