@@ -3,6 +3,8 @@ import { flash } from '@/core/operations/flash';
 import { startMonitor } from '@/core/operations/monitor';
 import { listDevices } from '@/core/operations/devices';
 import { findProjectRoot } from '@/core/services/idf';
+import { loadConfig, updateConfig } from '@/core/services/config';
+import { DEFAULT_FLASH_BAUD, DEFAULT_MONITOR_BAUD } from '@/core/constants';
 import { emitter, createOperationId } from '@/core/emitter';
 import * as prompts from '@/tui/prompts';
 import { logger } from '@/tui/logger';
@@ -21,17 +23,42 @@ export async function runCommand(options: RunOptions): Promise<void> {
     process.exit(1);
   }
 
-  let port = options.port;
+  const config = await loadConfig(projectDir);
+  const devices = await listDevices();
 
-  if (!port) {
-    const devicesResult = await listDevices();
+  if (!devices.ok) {
+    logger.error(devices.error);
+    process.exit(1);
+  }
 
-    if (!devicesResult.ok) {
-      logger.error(devicesResult.error);
-      process.exit(1);
+  let port = options.port || config.port;
+  let selectedDevice = port ? prompts.getDeviceByPort(devices.data, port) : undefined;
+
+  if (!port || !selectedDevice) {
+    port = await prompts.selectDevice(devices.data);
+    selectedDevice = prompts.getDeviceByPort(devices.data, port);
+  }
+
+  if (selectedDevice) {
+    const portCheck = prompts.checkPortForFlash(selectedDevice);
+    if (!portCheck.ok && portCheck.warning) {
+      logger.warn(portCheck.warning);
+      const useAnyway = await prompts.confirm('Continue with this port?', false);
+      if (!useAnyway) {
+        port = await prompts.selectDevice(devices.data);
+      }
     }
+  }
 
-    port = await prompts.selectDevice(devicesResult.data);
+  const flashBaud = options.baud || config.flashBaud || DEFAULT_FLASH_BAUD;
+  const monitorBaud = config.monitorBaud || DEFAULT_MONITOR_BAUD;
+
+  if (port !== config.port || flashBaud !== config.flashBaud) {
+    const saveSettings = await prompts.confirm('Save port and baud rate to project config?', true);
+    if (saveSettings) {
+      await updateConfig(projectDir, { port, flashBaud, monitorBaud });
+      logger.dim('Settings saved to espcli.json');
+    }
   }
 
   const streamHandler = (event: { data: { type: string; text?: string } }) => {
@@ -61,9 +88,9 @@ export async function runCommand(options: RunOptions): Promise<void> {
   const flashOpId = createOperationId();
   emitter.subscribe(flashOpId, streamHandler);
 
-  logger.step(`Flashing to ${port}...`);
+  logger.step(`Flashing to ${port} at ${flashBaud} baud...`);
 
-  const flashResult = await flash({ projectDir, port, baud: options.baud }, flashOpId);
+  const flashResult = await flash({ projectDir, port, baud: flashBaud }, flashOpId);
 
   if (!flashResult.ok) {
     logger.newline();
@@ -74,11 +101,11 @@ export async function runCommand(options: RunOptions): Promise<void> {
   logger.newline();
   logger.success('Flash complete');
 
-  logger.step('Starting monitor...');
+  logger.step(`Starting monitor at ${monitorBaud} baud...`);
   logger.dim('Press Ctrl+] to exit');
   logger.newline();
 
-  const monitorResult = await startMonitor({ port, baud: options.baud, projectDir });
+  const monitorResult = await startMonitor({ port, baud: monitorBaud, projectDir });
 
   if (!monitorResult.ok) {
     logger.error(monitorResult.error);

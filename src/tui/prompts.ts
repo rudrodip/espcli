@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { SerialDevice } from '@/core/types';
-import { ESP_TARGETS } from '@/core/constants';
+import { ESP_TARGETS, FLASH_BAUD_OPTIONS, MONITOR_BAUD_OPTIONS } from '@/core/constants';
 
 export async function confirm(message: string, initial = true): Promise<boolean> {
   const result = await p.confirm({ message, initialValue: initial });
@@ -73,9 +73,78 @@ export async function selectDevice(devices: SerialDevice[]): Promise<string> {
     devices.map((d) => ({
       value: d.port,
       label: d.port,
-      hint: d.chip || d.manufacturer,
+      hint: formatDeviceHint(d),
     }))
   );
+}
+
+function formatDeviceHint(d: SerialDevice): string {
+  const parts: string[] = [];
+  if (d.espChip) parts.push(d.espChip);
+  else if (d.chip) parts.push(d.chip);
+  else if (d.manufacturer) parts.push(d.manufacturer);
+
+  if (d.connectionType === 'native-usb') parts.push('USB');
+  else if (d.connectionType === 'uart-bridge') parts.push('UART');
+
+  return parts.join(' · ');
+}
+
+export function getDeviceByPort(devices: SerialDevice[], port: string): SerialDevice | undefined {
+  return devices.find((d) => d.port === port);
+}
+
+export function checkPortForFlash(device: SerialDevice): { ok: boolean; warning?: string } {
+  // Native USB is preferred for flashing on newer chips
+  // UART bridges work but may have issues with some chips
+  if (device.connectionType === 'uart-bridge' && device.espChip?.includes('S3')) {
+    return {
+      ok: false,
+      warning: `Port ${device.port} is a UART bridge. ESP32-S3 flashing works better with native USB port.`,
+    };
+  }
+  return { ok: true };
+}
+
+export function checkPortForMonitor(device: SerialDevice): { ok: boolean; warning?: string } {
+  // Monitor works on both, but UART is often more reliable for serial output
+  // Native USB can have issues with some debug output
+  return { ok: true };
+}
+
+export async function selectFlashBaud(defaultBaud?: number): Promise<number> {
+  const options = FLASH_BAUD_OPTIONS.map((o) => ({
+    value: String(o.value),
+    label: o.label,
+    hint: o.hint + (o.value === defaultBaud ? ' (current)' : ''),
+  }));
+
+  const result = await select('Select flash baud rate', options);
+  return parseInt(result, 10);
+}
+
+export async function selectMonitorBaud(defaultBaud?: number): Promise<number> {
+  const options = MONITOR_BAUD_OPTIONS.map((o) => ({
+    value: String(o.value),
+    label: o.label,
+    hint: o.hint + (o.value === defaultBaud ? ' (current)' : ''),
+  }));
+
+  const result = await select('Select monitor baud rate', options);
+  return parseInt(result, 10);
+}
+
+export async function confirmBaudRate(
+  type: 'flash' | 'monitor',
+  currentBaud: number
+): Promise<number> {
+  const change = await confirm(`Use ${type} baud rate ${currentBaud}?`, true);
+
+  if (change) {
+    return currentBaud;
+  }
+
+  return type === 'flash' ? selectFlashBaud(currentBaud) : selectMonitorBaud(currentBaud);
 }
 
 export function spinner() {

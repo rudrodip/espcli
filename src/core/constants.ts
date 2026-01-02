@@ -36,6 +36,21 @@ export const IDF_REPO_URL = 'https://github.com/espressif/esp-idf.git';
 export const DEFAULT_FLASH_BAUD = 460800;
 export const DEFAULT_MONITOR_BAUD = 115200;
 
+export const FLASH_BAUD_OPTIONS = [
+  { value: 115200, label: '115200', hint: 'Slow but reliable' },
+  { value: 230400, label: '230400', hint: 'Balanced' },
+  { value: 460800, label: '460800', hint: 'Default - fast and stable' },
+  { value: 921600, label: '921600', hint: 'Very fast (may be unstable)' },
+  { value: 1500000, label: '1500000', hint: 'Maximum (native USB only)' },
+] as const;
+
+export const MONITOR_BAUD_OPTIONS = [
+  { value: 74880, label: '74880', hint: 'ESP8266 boot messages' },
+  { value: 115200, label: '115200', hint: 'Default - standard rate' },
+  { value: 230400, label: '230400', hint: 'High speed logging' },
+  { value: 921600, label: '921600', hint: 'Very high speed' },
+] as const;
+
 /**
  * USB Vendor/Product IDs for ESP32 development boards
  *
