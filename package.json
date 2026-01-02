@@ -1,0 +1,49 @@
+{
+  "name": "espcli",
+  "version": "0.0.1",
+  "description": "Modern CLI for ESP-IDF development — install, create, build, flash, and monitor ESP32 projects",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "serve": "bun run src/serve.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --minify",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "web": "cd web && bun run dev",
+    "web:install": "cd web && bun install",
+    "web:build": "cd web && bun run build"
+  },
+  "bin": {
+    "espcli": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rudrodip/espcli"
+  },
+  "author": "rds_agi",
+  "license": "MIT",
+  "keywords": [
+    "espcli",
+    "esp32",
+    "esp-idf",
+    "embedded",
+    "iot"
+  ],
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "commander": "^14.0.2",
+    "execa": "^9.6.1",
+    "picocolors": "^1.1.1"
+  }
+}
