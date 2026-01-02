@@ -107,12 +107,16 @@ export async function runWithIdf(
   }
 }
 
-export function spawnWithIdf(
+export interface SpawnOptions extends RunOptions {
+  interactive?: boolean;
+}
+
+export async function spawnWithIdf(
   command: string,
   args: string[],
-  options: RunOptions = {}
-): ResultPromise | null {
-  const idfPath = process.env.IDF_PATH;
+  options: SpawnOptions = {}
+): Promise<{ proc: ResultPromise; promise: Promise<void> } | null> {
+  const idfPath = await findIdfPath();
 
   if (!idfPath) {
     return null;
@@ -121,16 +125,19 @@ export function spawnWithIdf(
   const exportScript = getExportScript(idfPath);
   const fullCommand = `source ${exportScript} > /dev/null 2>&1 && ${command} ${args.join(' ')}`;
 
-  const { cwd, operationId, env } = options;
+  const { cwd, operationId, env, interactive } = options;
 
   const proc = execa(fullCommand, [], {
     cwd,
     env: { ...process.env, ...env },
     shell: true,
     reject: false,
+    stdin: interactive ? 'inherit' : 'pipe',
+    stdout: interactive ? 'inherit' : 'pipe',
+    stderr: interactive ? 'inherit' : 'pipe',
   });
 
-  if (operationId) {
+  if (operationId && !interactive) {
     proc.stdout?.on('data', (data: Buffer) => {
       emitter.emit(operationId, { type: 'stdout', text: data.toString() });
     });
@@ -140,5 +147,7 @@ export function spawnWithIdf(
     });
   }
 
-  return proc;
+  const promise = proc.then(() => {});
+
+  return { proc, promise };
 }

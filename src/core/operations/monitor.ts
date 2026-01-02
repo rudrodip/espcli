@@ -9,32 +9,35 @@ const activeMonitors = new Map<string, ResultPromise>();
 export interface MonitorHandle {
   operationId: string;
   stop: () => void;
-  sendInput: (data: string) => void;
+  wait: () => Promise<void>;
 }
 
-export function startMonitor(
+export async function startMonitor(
   config: MonitorConfig,
   operationId?: string
-): Result<MonitorHandle> {
+): Promise<Result<MonitorHandle>> {
   const opId = operationId || createOperationId();
   const { port, baud = DEFAULT_MONITOR_BAUD, projectDir } = config;
 
   const args = ['-p', port, '-b', String(baud), 'monitor'];
 
-  const proc = spawnWithIdf('idf.py', args, {
+  const result = await spawnWithIdf('idf.py', args, {
     cwd: projectDir || process.cwd(),
     operationId: opId,
+    interactive: true,
   });
 
-  if (!proc) {
+  if (!result) {
     const error = 'ESP-IDF not found';
     emitter.emit(opId, { type: 'error', message: error });
     return { ok: false, error };
   }
 
+  const { proc, promise } = result;
+
   activeMonitors.set(opId, proc);
 
-  proc.then(() => {
+  promise.then(() => {
     activeMonitors.delete(opId);
     emitter.emit(opId, { type: 'complete', result: { stopped: true } });
   });
@@ -45,9 +48,7 @@ export function startMonitor(
       proc.kill('SIGTERM');
       activeMonitors.delete(opId);
     },
-    sendInput: (data: string) => {
-      proc.stdin?.write(data);
-    },
+    wait: () => promise,
   };
 
   return { ok: true, data: handle };

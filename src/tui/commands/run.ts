@@ -74,26 +74,19 @@ export async function runCommand(options: RunOptions): Promise<void> {
   logger.newline();
   logger.success('Flash complete');
 
-  const monitorOpId = createOperationId();
-  emitter.subscribe(monitorOpId, streamHandler);
-
   logger.step('Starting monitor...');
-  logger.dim('Press Ctrl+C to exit');
+  logger.dim('Press Ctrl+] to exit');
   logger.newline();
 
-  const monitorResult = startMonitor({ port, baud: options.baud, projectDir }, monitorOpId);
+  const monitorResult = await startMonitor({ port, baud: options.baud, projectDir });
 
   if (!monitorResult.ok) {
     logger.error(monitorResult.error);
     process.exit(1);
   }
 
-  process.on('SIGINT', () => {
-    monitorResult.data.stop();
-    logger.newline();
-    logger.info('Monitor stopped');
-    process.exit(0);
-  });
+  await monitorResult.data.wait();
 
-  await new Promise(() => {});
+  logger.newline();
+  logger.info('Monitor stopped');
 }

@@ -135,7 +135,7 @@ export const routes: Record<string, RouteHandler> = {
     }
 
     const operationId = createOperationId();
-    const result = startMonitor(body, operationId);
+    const result = await startMonitor(body, operationId);
 
     if (!result.ok) {
       return error(result.error, 500);
