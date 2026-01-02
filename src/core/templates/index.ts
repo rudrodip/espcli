@@ -8,6 +8,7 @@ import {
   getCppMain,
   getGitignore,
   getReadme,
+  getVsCodeCppProperties,
 } from '@/core/templates/files';
 
 export function generateProjectFiles(config: InitConfig): TemplateFile[] {
@@ -21,6 +22,7 @@ export function generateProjectFiles(config: InitConfig): TemplateFile[] {
     { path: `main/${mainFile}`, content: mainContent },
     { path: '.gitignore', content: getGitignore() },
     { path: 'README.md', content: getReadme(name, target) },
+    { path: '.vscode/c_cpp_properties.json', content: getVsCodeCppProperties() },
   ];
 }
 
@@ -30,6 +32,7 @@ export async function createProject(config: InitConfig): Promise<Result<InitResu
 
   try {
     await mkdir(join(projectPath, 'main'), { recursive: true });
+    await mkdir(join(projectPath, '.vscode'), { recursive: true });
 
     const createdFiles: string[] = [];
 
