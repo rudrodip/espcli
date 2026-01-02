@@ -1,4 +1,7 @@
 import type { InitConfig, InitResult, Result, TemplateFile } from '@/core/types';
+import type { ProjectConfig } from '@/core/services/config';
+import { CONFIG_FILENAME } from '@/core/services/config';
+import { DEFAULT_FLASH_BAUD, DEFAULT_MONITOR_BAUD } from '@/core/constants';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import {
@@ -10,6 +13,15 @@ import {
   getReadme,
   getVsCodeCppProperties,
 } from '@/core/templates/files';
+
+function getProjectConfig(target: string): string {
+  const config: ProjectConfig = {
+    target,
+    flashBaud: DEFAULT_FLASH_BAUD,
+    monitorBaud: DEFAULT_MONITOR_BAUD,
+  };
+  return JSON.stringify(config, null, 2) + '\n';
+}
 
 export function generateProjectFiles(config: InitConfig): TemplateFile[] {
   const { name, language, target } = config;
@@ -23,6 +35,7 @@ export function generateProjectFiles(config: InitConfig): TemplateFile[] {
     { path: '.gitignore', content: getGitignore() },
     { path: 'README.md', content: getReadme(name, target) },
     { path: '.vscode/c_cpp_properties.json', content: getVsCodeCppProperties() },
+    { path: CONFIG_FILENAME, content: getProjectConfig(target) },
   ];
 }
 
