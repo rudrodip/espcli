@@ -7,12 +7,12 @@ export async function devicesCommand(): Promise<void> {
 
   const result = await listDevices();
 
-  if (!result.ok) {
-    logger.error(result.error);
+  if (result.isErr()) {
+    logger.error(result.error.message);
     process.exit(1);
   }
 
   logger.newline();
-  deviceTable(result.data);
+  deviceTable(result.value);
   logger.newline();
 }

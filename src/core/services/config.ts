@@ -1,4 +1,5 @@
-import type { Result } from '@/core/types';
+import { ResultAsync, ok } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { readFile, writeFile, access } from 'fs/promises';
 import { join } from 'path';
 
@@ -54,51 +55,45 @@ function serializeConfig(config: ProjectConfig): string {
   return lines.join('\n') + '\n';
 }
 
-export async function configExists(projectDir: string): Promise<boolean> {
-  const configPath = join(projectDir, CONFIG_FILENAME);
-  try {
-    await access(configPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function loadConfig(projectDir: string): Promise<ProjectConfig> {
+export function configExists(projectDir: string): ResultAsync<boolean, AppError> {
   const configPath = join(projectDir, CONFIG_FILENAME);
 
-  try {
-    await access(configPath);
-    const content = await readFile(configPath, 'utf-8');
-    return parseConfig(content);
-  } catch {
-    return {};
-  }
+  return ResultAsync.fromPromise(
+    access(configPath).then(() => true),
+    () => AppError.fileNotFound(configPath)
+  ).orElse(() => ok(false));
 }
 
-export async function saveConfig(projectDir: string, config: ProjectConfig): Promise<Result<void>> {
+export function loadConfig(projectDir: string): ResultAsync<ProjectConfig, AppError> {
   const configPath = join(projectDir, CONFIG_FILENAME);
 
-  try {
-    const content = serializeConfig(config);
-    await writeFile(configPath, content, 'utf-8');
-    return { ok: true, data: undefined };
-  } catch (err) {
-    return { ok: false, error: `Failed to save config: ${err}` };
-  }
+  return ResultAsync.fromPromise(access(configPath), () => AppError.fileNotFound(configPath))
+    .andThen(() =>
+      ResultAsync.fromPromise(
+        readFile(configPath, 'utf-8'),
+        (e) => AppError.configReadFailed(configPath, e instanceof Error ? e : undefined)
+      )
+    )
+    .map(parseConfig)
+    .orElse(() => ok({})); // Return empty config if file doesn't exist
 }
 
-export async function updateConfig(
+export function saveConfig(projectDir: string, config: ProjectConfig): ResultAsync<void, AppError> {
+  const configPath = join(projectDir, CONFIG_FILENAME);
+  const content = serializeConfig(config);
+
+  return ResultAsync.fromPromise(
+    writeFile(configPath, content, 'utf-8'),
+    (e) => AppError.configWriteFailed(configPath, e instanceof Error ? e : undefined)
+  );
+}
+
+export function updateConfig(
   projectDir: string,
   updates: Partial<ProjectConfig>
-): Promise<Result<ProjectConfig>> {
-  const existing = await loadConfig(projectDir);
-  const merged = { ...existing, ...updates };
-
-  const result = await saveConfig(projectDir, merged);
-  if (!result.ok) {
-    return result;
-  }
-
-  return { ok: true, data: merged };
+): ResultAsync<ProjectConfig, AppError> {
+  return loadConfig(projectDir).andThen((existing) => {
+    const merged = { ...existing, ...updates };
+    return saveConfig(projectDir, merged).map(() => merged);
+  });
 }

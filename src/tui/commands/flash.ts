@@ -13,27 +13,31 @@ interface FlashOptions {
 }
 
 export async function flashCommand(options: FlashOptions): Promise<void> {
-  const projectDir = await findProjectRoot(process.cwd());
+  const projectResult = await findProjectRoot(process.cwd());
 
-  if (!projectDir) {
+  if (projectResult.isErr()) {
     logger.error('Not in an ESP-IDF project directory');
     process.exit(1);
   }
 
-  const config = await loadConfig(projectDir);
-  const devices = await listDevices();
+  const projectDir = projectResult.value;
+  const configResult = await loadConfig(projectDir);
+  const config = configResult.isOk() ? configResult.value : {};
 
-  if (!devices.ok) {
-    logger.error(devices.error);
+  const devicesResult = await listDevices();
+
+  if (devicesResult.isErr()) {
+    logger.error(devicesResult.error.message);
     process.exit(1);
   }
 
+  const devices = devicesResult.value;
   let port = options.port || config.port;
-  let selectedDevice = port ? prompts.getDeviceByPort(devices.data, port) : undefined;
+  let selectedDevice = port ? prompts.getDeviceByPort(devices, port) : undefined;
 
   if (!port || !selectedDevice) {
-    port = await prompts.selectDevice(devices.data);
-    selectedDevice = prompts.getDeviceByPort(devices.data, port);
+    port = await prompts.selectDevice(devices);
+    selectedDevice = prompts.getDeviceByPort(devices, port);
   }
 
   if (selectedDevice) {
@@ -42,8 +46,8 @@ export async function flashCommand(options: FlashOptions): Promise<void> {
       logger.warn(portCheck.warning);
       const useAnyway = await prompts.confirm('Continue with this port?', false);
       if (!useAnyway) {
-        port = await prompts.selectDevice(devices.data);
-        selectedDevice = prompts.getDeviceByPort(devices.data, port);
+        port = await prompts.selectDevice(devices);
+        selectedDevice = prompts.getDeviceByPort(devices, port);
       }
     }
   }
@@ -55,7 +59,8 @@ export async function flashCommand(options: FlashOptions): Promise<void> {
   }
 
   if (port !== config.port || baud !== config.flashBaud) {
-    const hasConfig = await configExists(projectDir);
+    const hasConfigResult = await configExists(projectDir);
+    const hasConfig = hasConfigResult.isOk() && hasConfigResult.value;
     if (hasConfig) {
       await updateConfig(projectDir, { port, flashBaud: baud });
     } else {
@@ -79,9 +84,9 @@ export async function flashCommand(options: FlashOptions): Promise<void> {
 
   const result = await flash({ projectDir, port, baud }, opId);
 
-  if (!result.ok) {
+  if (result.isErr()) {
     logger.newline();
-    logger.error(result.error);
+    logger.error(result.error.message);
     process.exit(1);
   }
 

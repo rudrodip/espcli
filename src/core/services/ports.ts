@@ -1,4 +1,6 @@
 import type { SerialDevice, ConnectionType } from '@/core/types';
+import { ResultAsync, ok } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { USB_VENDORS } from '@/core/constants';
 import { requireIdf } from '@/core/services/health';
 import { execa } from 'execa';
@@ -18,54 +20,48 @@ const ESPRESSIF_VID = '303A';
  *
  * @see https://pyserial.readthedocs.io/en/latest/tools.html#module-serial.tools.list_ports
  */
-export async function listPorts(): Promise<SerialDevice[]> {
-  const idf = await requireIdf();
-  if (!idf.ok) return []; // IDF not installed
+export function listPorts(): ResultAsync<SerialDevice[], AppError> {
+  return requireIdf()
+    .andThen(({ python }) =>
+      ResultAsync.fromPromise(
+        execa(python, ['-m', 'serial.tools.list_ports', '-v'], { timeout: 5000 }),
+        (e) => AppError.commandFailed('serial.tools.list_ports', String(e))
+      ).andThen(({ stdout }) => {
+        const devices: SerialDevice[] = [];
+        const lines = stdout.split('\n');
 
-  const python = idf.python;
+        let currentPort: string | null = null;
+        let desc = '';
+        let hwid = '';
 
-  try {
-    // pyserial CLI tool - cross-platform serial port enumeration
-    // @see https://github.com/pyserial/pyserial/blob/master/serial/tools/list_ports.py
-    const { stdout } = await execa(python, ['-m', 'serial.tools.list_ports', '-v'], {
-      timeout: 5000,
-    });
+        for (const line of lines) {
+          if (line.startsWith('/dev/')) {
+            // Save previous device if exists
+            if (currentPort) {
+              const device = parseDevice(currentPort, desc, hwid);
+              if (device) devices.push(device);
+            }
+            currentPort = line.trim();
+            desc = '';
+            hwid = '';
+          } else if (line.includes('desc:')) {
+            desc = line.split('desc:')[1]?.trim() || '';
+          } else if (line.includes('hwid:')) {
+            hwid = line.split('hwid:')[1]?.trim() || '';
+          }
+        }
 
-    const devices: SerialDevice[] = [];
-    const lines = stdout.split('\n');
-
-    let currentPort: string | null = null;
-    let desc = '';
-    let hwid = '';
-
-    for (const line of lines) {
-      if (line.startsWith('/dev/')) {
-        // Save previous device if exists
+        // Don't forget last device
         if (currentPort) {
           const device = parseDevice(currentPort, desc, hwid);
           if (device) devices.push(device);
         }
-        currentPort = line.trim();
-        desc = '';
-        hwid = '';
-      } else if (line.includes('desc:')) {
-        desc = line.split('desc:')[1]?.trim() || '';
-      } else if (line.includes('hwid:')) {
-        hwid = line.split('hwid:')[1]?.trim() || '';
-      }
-    }
 
-    // Don't forget last device
-    if (currentPort) {
-      const device = parseDevice(currentPort, desc, hwid);
-      if (device) devices.push(device);
-    }
-
-    // Detect ESP chips for all compatible devices
-    return await detectEspChips(python, devices);
-  } catch {
-    return [];
-  }
+        // Detect ESP chips for all compatible devices
+        return detectEspChips(python, devices);
+      })
+    )
+    .orElse(() => ok([])); // Return empty array if IDF not installed or command fails
 }
 
 /**
@@ -118,27 +114,27 @@ function identifyChip(vendorId?: string, productId?: string): string | undefined
 /**
  * @see https://github.com/espressif/esptool#chip-id
  */
-async function detectEspChips(python: string, devices: SerialDevice[]): Promise<SerialDevice[]> {
-  const results = await Promise.all(
-    devices.map(async (device) => {
-      // Only detect on ESP-compatible ports
-      const isEspCompatible =
-        device.connectionType === 'native-usb' ||
-        device.chip?.includes('CH34') ||
-        device.chip?.includes('CP210') ||
-        device.chip?.includes('FT232') ||
-        device.chip?.includes('CH9');
+function detectEspChips(python: string, devices: SerialDevice[]): ResultAsync<SerialDevice[], AppError> {
+  return ResultAsync.fromSafePromise(
+    Promise.all(
+      devices.map(async (device) => {
+        // Only detect on ESP-compatible ports
+        const isEspCompatible =
+          device.connectionType === 'native-usb' ||
+          device.chip?.includes('CH34') ||
+          device.chip?.includes('CP210') ||
+          device.chip?.includes('FT232') ||
+          device.chip?.includes('CH9');
 
-      if (isEspCompatible) {
-        const espChip = await detectEspChip(python, device.port);
-        return { ...device, espChip };
-      }
+        if (isEspCompatible) {
+          const espChip = await detectEspChip(python, device.port);
+          return { ...device, espChip };
+        }
 
-      return device;
-    })
+        return device;
+      })
+    )
   );
-
-  return results;
 }
 
 /**

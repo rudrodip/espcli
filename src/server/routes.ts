@@ -55,16 +55,17 @@ export const routes: Record<string, RouteHandler> = {
 
   'GET /api/devices': async () => {
     const result = await listDevices();
-    if (!result.ok) {
-      return error(result.error, 500);
+    if (result.isErr()) {
+      return error(result.error.message, 500);
     }
-    const response: DevicesResponse = { devices: result.data };
+    const response: DevicesResponse = { devices: result.value };
     return json(response);
   },
 
   'GET /api/idf/status': async () => {
-    const status = await getIdfStatus();
-    return json(status);
+    const statusResult = await getIdfStatus();
+    // getIdfStatus never fails (Result<IdfStatus, never>)
+    return json(statusResult._unsafeUnwrap());
   },
 
   'POST /api/install': async (req) => {
@@ -92,11 +93,11 @@ export const routes: Record<string, RouteHandler> = {
 
     const result = await init(body);
 
-    if (!result.ok) {
-      return json({ ok: false, error: result.error });
+    if (result.isErr()) {
+      return json({ ok: false, error: result.error.message });
     }
 
-    return json({ ok: true, projectPath: result.data.projectPath });
+    return json({ ok: true, projectPath: result.value.projectPath });
   },
 
   'POST /api/build': async (req) => {
@@ -137,8 +138,8 @@ export const routes: Record<string, RouteHandler> = {
     const operationId = createOperationId();
     const result = await startMonitor(body, operationId);
 
-    if (!result.ok) {
-      return error(result.error, 500);
+    if (result.isErr()) {
+      return error(result.error.message, 500);
     }
 
     return json({ operationId });
@@ -165,7 +166,11 @@ export const routes: Record<string, RouteHandler> = {
 
     const result = await clean(body);
 
-    return json({ ok: result.ok, error: result.ok ? undefined : result.error });
+    if (result.isErr()) {
+      return json({ ok: false, error: result.error.message });
+    }
+
+    return json({ ok: true });
   },
 };
 

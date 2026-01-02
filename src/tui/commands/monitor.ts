@@ -12,29 +12,34 @@ interface MonitorOptions {
 }
 
 export async function monitorCommand(options: MonitorOptions): Promise<void> {
-  const projectDir = await findProjectRoot(process.cwd());
+  const projectResult = await findProjectRoot(process.cwd());
 
-  if (!projectDir) {
+  if (projectResult.isErr()) {
     logger.error('Not an ESP-IDF project directory');
     logger.dim('Run this command from within an ESP-IDF project, or use "espcli init" to create one');
     process.exit(1);
   }
 
-  const config = await loadConfig(projectDir);
-  const devices = await listDevices();
+  const projectDir = projectResult.value;
+  const configResult = await loadConfig(projectDir);
+  const config = configResult.isOk() ? configResult.value : {};
 
-  if (!devices.ok) {
-    logger.error(devices.error);
+  const devicesResult = await listDevices();
+
+  if (devicesResult.isErr()) {
+    logger.error(devicesResult.error.message);
     process.exit(1);
   }
 
+  const devices = devicesResult.value;
+
   // Determine port: CLI option > config > prompt
   let port = options.port || config.port;
-  let selectedDevice = port ? prompts.getDeviceByPort(devices.data, port) : undefined;
+  let selectedDevice = port ? prompts.getDeviceByPort(devices, port) : undefined;
 
   if (!port || !selectedDevice) {
-    port = await prompts.selectDevice(devices.data);
-    selectedDevice = prompts.getDeviceByPort(devices.data, port);
+    port = await prompts.selectDevice(devices);
+    selectedDevice = prompts.getDeviceByPort(devices, port);
   }
 
   // Check port type and warn if potentially incompatible
@@ -44,7 +49,7 @@ export async function monitorCommand(options: MonitorOptions): Promise<void> {
       logger.warn(portCheck.warning);
       const useAnyway = await prompts.confirm('Continue with this port?', false);
       if (!useAnyway) {
-        port = await prompts.selectDevice(devices.data);
+        port = await prompts.selectDevice(devices);
       }
     }
   }
@@ -58,7 +63,8 @@ export async function monitorCommand(options: MonitorOptions): Promise<void> {
 
   // Save settings if config exists, otherwise ask
   if (port !== config.port || baud !== config.monitorBaud) {
-    const hasConfig = await configExists(projectDir);
+    const hasConfigResult = await configExists(projectDir);
+    const hasConfig = hasConfigResult.isOk() && hasConfigResult.value;
     if (hasConfig) {
       await updateConfig(projectDir, { port, monitorBaud: baud });
     } else {
@@ -76,12 +82,12 @@ export async function monitorCommand(options: MonitorOptions): Promise<void> {
 
   const result = await startMonitor({ port, baud, projectDir });
 
-  if (!result.ok) {
-    logger.error(result.error);
+  if (result.isErr()) {
+    logger.error(result.error.message);
     process.exit(1);
   }
 
-  await result.data.wait();
+  await result.value.wait();
 
   logger.newline();
   logger.info('Monitor stopped');

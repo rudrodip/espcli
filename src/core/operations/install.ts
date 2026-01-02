@@ -1,4 +1,6 @@
-import type { InstallConfig, InstallResult, Result } from '@/core/types';
+import type { InstallConfig, InstallResult } from '@/core/types';
+import { ResultAsync, ok, err } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { emitter, createOperationId } from '@/core/emitter';
 import { DEFAULT_ESP_PATH, IDF_REPO_URL } from '@/core/constants';
 import { run } from '@/core/services/process';
@@ -7,93 +9,102 @@ import { getIdfVersion } from '@/core/services/idf';
 import { mkdir, access } from 'fs/promises';
 import { join } from 'path';
 
-export async function install(
+export function install(
   config: Partial<InstallConfig> = {},
   operationId?: string
-): Promise<Result<InstallResult>> {
+): ResultAsync<InstallResult, AppError> {
   const opId = operationId || createOperationId();
   const espPath = config.path || DEFAULT_ESP_PATH;
   const target = config.target || 'all';
   const addToShell = config.addToShell ?? true;
   const idfPath = join(espPath, 'esp-idf');
 
-  try {
-    await access(idfPath);
-    const version = await getIdfVersion(idfPath);
-    emitter.emit(opId, { type: 'log', level: 'info', message: `ESP-IDF already installed at ${idfPath}` });
-    return {
-      ok: true,
-      data: {
-        idfPath,
-        version: version || 'unknown',
-        addedToShell: false,
-      },
-    };
-  } catch {}
+  // Check if already installed
+  return ResultAsync.fromPromise(access(idfPath), () => null as never)
+    .andThen(() =>
+      getIdfVersion(idfPath)
+        .map((version) => {
+          emitter.emit(opId, { type: 'log', level: 'info', message: `ESP-IDF already installed at ${idfPath}` });
+          return {
+            idfPath,
+            version: version || 'unknown',
+            addedToShell: false,
+          } as InstallResult;
+        })
+        .orElse(() =>
+          ok({
+            idfPath,
+            version: 'unknown',
+            addedToShell: false,
+          } as InstallResult)
+        )
+    )
+    .orElse(() => {
+      // Not installed, proceed with installation
+      emitter.emit(opId, { type: 'progress', message: 'Creating ESP directory...' });
 
-  emitter.emit(opId, { type: 'progress', message: 'Creating ESP directory...' });
+      return ResultAsync.fromPromise(mkdir(espPath, { recursive: true }), (e) =>
+        AppError.fileWriteFailed(espPath, e instanceof Error ? e : undefined)
+      ).andThen(() => {
+        emitter.emit(opId, { type: 'progress', message: 'Cloning ESP-IDF repository...', percent: 10 });
 
-  try {
-    await mkdir(espPath, { recursive: true });
-  } catch (err) {
-    return { ok: false, error: `Failed to create directory: ${err}` };
-  }
+        return run('git', ['clone', '--recursive', IDF_REPO_URL], {
+          cwd: espPath,
+          operationId: opId,
+        })
+          .andThen((cloneResult) => {
+            if (cloneResult.exitCode !== 0) {
+              return err(AppError.commandFailed('git', `Git clone failed with exit code ${cloneResult.exitCode}`));
+            }
 
-  emitter.emit(opId, { type: 'progress', message: 'Cloning ESP-IDF repository...', percent: 10 });
+            emitter.emit(opId, { type: 'progress', message: 'Running install script...', percent: 50 });
 
-  const cloneResult = await run('git', ['clone', '--recursive', IDF_REPO_URL], {
-    cwd: espPath,
-    operationId: opId,
-  });
+            const installArgs = target === 'all' ? ['all'] : [target];
+            return run('./install.sh', installArgs, {
+              cwd: idfPath,
+              operationId: opId,
+            });
+          })
+          .andThen((installResult) => {
+            if (installResult.exitCode !== 0) {
+              return err(
+                AppError.commandFailed('install.sh', `Install script failed with exit code ${installResult.exitCode}`)
+              );
+            }
 
-  if (!cloneResult.ok) {
-    return { ok: false, error: cloneResult.error };
-  }
+            let addedToShellResult = ResultAsync.fromSafePromise(Promise.resolve(false));
 
-  if (cloneResult.data.exitCode !== 0) {
-    return { ok: false, error: `Git clone failed with exit code ${cloneResult.data.exitCode}` };
-  }
+            if (addToShell) {
+              emitter.emit(opId, { type: 'progress', message: 'Configuring shell...', percent: 90 });
+              const exportCmd = getExportCommand(idfPath);
+              addedToShellResult = addToShellConfig(exportCmd)
+                .map(() => true)
+                .orElse((shellError) => {
+                  emitter.emit(opId, { type: 'log', level: 'warn', message: shellError.message });
+                  return ok(false);
+                });
+            }
 
-  emitter.emit(opId, { type: 'progress', message: 'Running install script...', percent: 50 });
-
-  const installArgs = target === 'all' ? ['all'] : [target];
-  const installResult = await run('./install.sh', installArgs, {
-    cwd: idfPath,
-    operationId: opId,
-  });
-
-  if (!installResult.ok) {
-    return { ok: false, error: installResult.error };
-  }
-
-  if (installResult.data.exitCode !== 0) {
-    return { ok: false, error: `Install script failed with exit code ${installResult.data.exitCode}` };
-  }
-
-  let addedToShell = false;
-
-  if (addToShell) {
-    emitter.emit(opId, { type: 'progress', message: 'Configuring shell...', percent: 90 });
-    const exportCmd = getExportCommand(idfPath);
-    const shellResult = await addToShellConfig(exportCmd);
-
-    if (shellResult.ok) {
-      addedToShell = true;
-    } else {
-      emitter.emit(opId, { type: 'log', level: 'warn', message: shellResult.error });
-    }
-  }
-
-  const version = await getIdfVersion(idfPath);
-
-  emitter.emit(opId, { type: 'complete', result: { idfPath, version, addedToShell } });
-
-  return {
-    ok: true,
-    data: {
-      idfPath,
-      version: version || 'unknown',
-      addedToShell,
-    },
-  };
+            return addedToShellResult.andThen((addedToShell) =>
+              getIdfVersion(idfPath)
+                .map((version) => {
+                  const result: InstallResult = {
+                    idfPath,
+                    version: version || 'unknown',
+                    addedToShell,
+                  };
+                  emitter.emit(opId, { type: 'complete', result });
+                  return result;
+                })
+                .orElse(() =>
+                  ok({
+                    idfPath,
+                    version: 'unknown',
+                    addedToShell,
+                  } as InstallResult)
+                )
+            );
+          });
+      });
+    });
 }

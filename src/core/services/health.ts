@@ -1,3 +1,5 @@
+import { Result, ResultAsync, ok, err } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { execa } from 'execa';
 import { readdir, access, readFile } from 'fs/promises';
 import { join } from 'path';
@@ -17,39 +19,52 @@ export interface SystemHealth {
   pyserial: HealthStatus;
   esptool: HealthStatus;
   git: HealthStatus;
-  idfPython?: string; // Path to IDF's Python environment
+  idfPython?: string;
+}
+
+export interface IdfRequirement {
+  python: string;
+  idfPath: string;
 }
 
 let healthCache: SystemHealth | null = null;
 
-export async function getHealth(): Promise<SystemHealth> {
-  if (healthCache) return healthCache;
+export function getHealth(): ResultAsync<SystemHealth, never> {
+  if (healthCache) {
+    return ResultAsync.fromSafePromise(Promise.resolve(healthCache));
+  }
 
-  healthCache = await runHealthChecks();
-  return healthCache;
+  return runHealthChecks().map((health) => {
+    healthCache = health;
+    return health;
+  });
 }
 
 export function clearHealthCache(): void {
   healthCache = null;
 }
 
-async function runHealthChecks(): Promise<SystemHealth> {
-  // Run checks in parallel for speed
-  const [python, git] = await Promise.all([checkPython(), checkGit()]);
+function runHealthChecks(): ResultAsync<SystemHealth, never> {
+  return ResultAsync.fromSafePromise(
+    (async () => {
+      // Run parallel checks
+      const [python, git] = await Promise.all([checkPython(), checkGit()]);
 
-  // IDF check depends on knowing if Python exists
-  const idf = await checkIdf();
+      // IDF check depends on knowing if Python exists
+      const idf = await checkIdf();
 
-  // These depend on IDF Python environment
-  const idfPython = idf.ok ? await findIdfPython() : undefined;
-  const [pyserial, esptool] = idfPython
-    ? await Promise.all([checkPyserial(idfPython), checkEsptool(idfPython)])
-    : [
-        { ok: false, name: 'pyserial', error: 'ESP-IDF not installed', hint: 'Run: espcli install' },
-        { ok: false, name: 'esptool', error: 'ESP-IDF not installed', hint: 'Run: espcli install' },
-      ];
+      // These depend on IDF Python environment
+      const idfPython = idf.ok ? await findIdfPython() : undefined;
+      const [pyserial, esptool] = idfPython
+        ? await Promise.all([checkPyserial(idfPython), checkEsptool(idfPython)])
+        : [
+            { ok: false, name: 'pyserial', error: 'ESP-IDF not installed', hint: 'Run: espcli install' },
+            { ok: false, name: 'esptool', error: 'ESP-IDF not installed', hint: 'Run: espcli install' },
+          ];
 
-  return { python, idf, pyserial, esptool, git, idfPython };
+      return { python, idf, pyserial, esptool, git, idfPython };
+    })()
+  );
 }
 
 async function checkPython(): Promise<HealthStatus> {
@@ -84,11 +99,9 @@ async function checkGit(): Promise<HealthStatus> {
 
 async function checkIdf(): Promise<HealthStatus> {
   const home = process.env.HOME || '';
-  const possiblePaths = [
-    process.env.IDF_PATH,
-    join(home, 'esp', 'esp-idf'),
-    join(home, 'esp-idf'),
-  ].filter(Boolean) as string[];
+  const possiblePaths = [process.env.IDF_PATH, join(home, 'esp', 'esp-idf'), join(home, 'esp-idf')].filter(
+    Boolean
+  ) as string[];
 
   for (const idfPath of possiblePaths) {
     try {
@@ -151,11 +164,7 @@ async function findIdfPython(): Promise<string | undefined> {
 
 async function checkPyserial(python: string): Promise<HealthStatus> {
   try {
-    const { stdout } = await execa(
-      python,
-      ['-c', 'import serial; print(serial.__version__)'],
-      { timeout: 3000 }
-    );
+    const { stdout } = await execa(python, ['-c', 'import serial; print(serial.__version__)'], { timeout: 3000 });
     return { ok: true, name: 'pyserial', version: stdout.trim() };
   } catch {
     return {
@@ -186,29 +195,33 @@ async function checkEsptool(python: string): Promise<HealthStatus> {
   }
 }
 
-export async function requireIdf(): Promise<{ ok: true; python: string } | { ok: false; error: string }> {
-  const health = await getHealth();
+export function requireIdf(): ResultAsync<IdfRequirement, AppError> {
+  return getHealth().andThen((health) => {
+    if (!health.idf.ok) {
+      return err(AppError.idfNotInstalled());
+    }
 
-  if (!health.idf.ok) {
-    return { ok: false, error: `${health.idf.error}. ${health.idf.hint}` };
-  }
+    if (!health.idfPython) {
+      return err(AppError.idfPythonNotFound());
+    }
 
-  if (!health.idfPython) {
-    return { ok: false, error: 'ESP-IDF Python environment not found. Run: espcli install' };
-  }
-
-  return { ok: true, python: health.idfPython };
+    return ok({
+      python: health.idfPython,
+      idfPath: health.idf.path!,
+    });
+  });
 }
 
-export async function requireTool(
+export function requireTool(
   tool: 'python' | 'git' | 'idf' | 'pyserial' | 'esptool'
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const health = await getHealth();
-  const status = health[tool];
+): ResultAsync<void, AppError> {
+  return getHealth().andThen((health) => {
+    const status = health[tool];
 
-  if (!status.ok) {
-    return { ok: false, error: `${status.error}. ${status.hint}` };
-  }
+    if (!status.ok) {
+      return err(AppError.commandNotFound(`${status.error}. ${status.hint}`));
+    }
 
-  return { ok: true };
+    return ok(undefined);
+  });
 }

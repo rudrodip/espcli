@@ -9,13 +9,14 @@ interface BuildOptions {
 }
 
 export async function buildCommand(options: BuildOptions): Promise<void> {
-  const projectDir = await findProjectRoot(process.cwd());
+  const projectResult = await findProjectRoot(process.cwd());
 
-  if (!projectDir) {
+  if (projectResult.isErr()) {
     logger.error('Not in an ESP-IDF project directory');
     process.exit(1);
   }
 
+  const projectDir = projectResult.value;
   const opId = createOperationId();
 
   emitter.subscribe(opId, (event) => {
@@ -37,9 +38,9 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
     opId
   );
 
-  if (!result.ok) {
+  if (result.isErr()) {
     logger.newline();
-    logger.error(result.error);
+    logger.error(result.error.message);
     process.exit(1);
   }
 

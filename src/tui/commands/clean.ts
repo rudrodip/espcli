@@ -8,13 +8,14 @@ interface CleanOptions {
 }
 
 export async function cleanCommand(options: CleanOptions): Promise<void> {
-  const projectDir = await findProjectRoot(process.cwd());
+  const projectResult = await findProjectRoot(process.cwd());
 
-  if (!projectDir) {
+  if (projectResult.isErr()) {
     logger.error('Not in an ESP-IDF project directory');
     process.exit(1);
   }
 
+  const projectDir = projectResult.value;
   const opId = createOperationId();
 
   logger.step(options.full ? 'Running fullclean...' : 'Cleaning build...');
@@ -27,8 +28,8 @@ export async function cleanCommand(options: CleanOptions): Promise<void> {
     opId
   );
 
-  if (!result.ok) {
-    logger.error(result.error);
+  if (result.isErr()) {
+    logger.error(result.error.message);
     process.exit(1);
   }
 

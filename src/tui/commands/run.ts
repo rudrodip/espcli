@@ -16,27 +16,31 @@ interface RunOptions {
 }
 
 export async function runCommand(options: RunOptions): Promise<void> {
-  const projectDir = await findProjectRoot(process.cwd());
+  const projectResult = await findProjectRoot(process.cwd());
 
-  if (!projectDir) {
+  if (projectResult.isErr()) {
     logger.error('Not in an ESP-IDF project directory');
     process.exit(1);
   }
 
-  const config = await loadConfig(projectDir);
-  const devices = await listDevices();
+  const projectDir = projectResult.value;
+  const configResult = await loadConfig(projectDir);
+  const config = configResult.isOk() ? configResult.value : {};
 
-  if (!devices.ok) {
-    logger.error(devices.error);
+  const devicesResult = await listDevices();
+
+  if (devicesResult.isErr()) {
+    logger.error(devicesResult.error.message);
     process.exit(1);
   }
 
+  const devices = devicesResult.value;
   let port = options.port || config.port;
-  let selectedDevice = port ? prompts.getDeviceByPort(devices.data, port) : undefined;
+  let selectedDevice = port ? prompts.getDeviceByPort(devices, port) : undefined;
 
   if (!port || !selectedDevice) {
-    port = await prompts.selectDevice(devices.data);
-    selectedDevice = prompts.getDeviceByPort(devices.data, port);
+    port = await prompts.selectDevice(devices);
+    selectedDevice = prompts.getDeviceByPort(devices, port);
   }
 
   if (selectedDevice) {
@@ -45,7 +49,7 @@ export async function runCommand(options: RunOptions): Promise<void> {
       logger.warn(portCheck.warning);
       const useAnyway = await prompts.confirm('Continue with this port?', false);
       if (!useAnyway) {
-        port = await prompts.selectDevice(devices.data);
+        port = await prompts.selectDevice(devices);
       }
     }
   }
@@ -54,7 +58,8 @@ export async function runCommand(options: RunOptions): Promise<void> {
   const monitorBaud = config.monitorBaud || DEFAULT_MONITOR_BAUD;
 
   if (port !== config.port || flashBaud !== config.flashBaud) {
-    const hasConfig = await configExists(projectDir);
+    const hasConfigResult = await configExists(projectDir);
+    const hasConfig = hasConfigResult.isOk() && hasConfigResult.value;
     if (hasConfig) {
       await updateConfig(projectDir, { port, flashBaud, monitorBaud });
     } else {
@@ -80,9 +85,9 @@ export async function runCommand(options: RunOptions): Promise<void> {
 
     const buildResult = await build({ projectDir }, buildOpId);
 
-    if (!buildResult.ok) {
+    if (buildResult.isErr()) {
       logger.newline();
-      logger.error(buildResult.error);
+      logger.error(buildResult.error.message);
       process.exit(1);
     }
 
@@ -97,9 +102,9 @@ export async function runCommand(options: RunOptions): Promise<void> {
 
   const flashResult = await flash({ projectDir, port, baud: flashBaud }, flashOpId);
 
-  if (!flashResult.ok) {
+  if (flashResult.isErr()) {
     logger.newline();
-    logger.error(flashResult.error);
+    logger.error(flashResult.error.message);
     process.exit(1);
   }
 
@@ -112,12 +117,12 @@ export async function runCommand(options: RunOptions): Promise<void> {
 
   const monitorResult = await startMonitor({ port, baud: monitorBaud, projectDir });
 
-  if (!monitorResult.ok) {
-    logger.error(monitorResult.error);
+  if (monitorResult.isErr()) {
+    logger.error(monitorResult.error.message);
     process.exit(1);
   }
 
-  await monitorResult.data.wait();
+  await monitorResult.value.wait();
 
   logger.newline();
   logger.info('Monitor stopped');

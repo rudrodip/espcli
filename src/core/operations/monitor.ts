@@ -1,4 +1,6 @@
-import type { MonitorConfig, Result } from '@/core/types';
+import type { MonitorConfig } from '@/core/types';
+import { ResultAsync, ok, err } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { emitter, createOperationId } from '@/core/emitter';
 import { spawnWithIdf } from '@/core/services/process';
 import { DEFAULT_MONITOR_BAUD } from '@/core/constants';
@@ -12,46 +14,35 @@ export interface MonitorHandle {
   wait: () => Promise<void>;
 }
 
-export async function startMonitor(
-  config: MonitorConfig,
-  operationId?: string
-): Promise<Result<MonitorHandle>> {
+export function startMonitor(config: MonitorConfig, operationId?: string): ResultAsync<MonitorHandle, AppError> {
   const opId = operationId || createOperationId();
   const { port, baud = DEFAULT_MONITOR_BAUD, projectDir } = config;
 
   const args = ['-p', port, '-b', String(baud), 'monitor'];
 
-  const result = await spawnWithIdf('idf.py', args, {
+  return spawnWithIdf('idf.py', args, {
     cwd: projectDir || process.cwd(),
     operationId: opId,
     interactive: true,
-  });
+  }).map(({ proc, promise }) => {
+    activeMonitors.set(opId, proc);
 
-  if (!result) {
-    const error = 'ESP-IDF not found';
-    emitter.emit(opId, { type: 'error', message: error });
-    return { ok: false, error };
-  }
-
-  const { proc, promise } = result;
-
-  activeMonitors.set(opId, proc);
-
-  promise.then(() => {
-    activeMonitors.delete(opId);
-    emitter.emit(opId, { type: 'complete', result: { stopped: true } });
-  });
-
-  const handle: MonitorHandle = {
-    operationId: opId,
-    stop: () => {
-      proc.kill('SIGTERM');
+    promise.then(() => {
       activeMonitors.delete(opId);
-    },
-    wait: () => promise,
-  };
+      emitter.emit(opId, { type: 'complete', result: { stopped: true } });
+    });
 
-  return { ok: true, data: handle };
+    const handle: MonitorHandle = {
+      operationId: opId,
+      stop: () => {
+        proc.kill('SIGTERM');
+        activeMonitors.delete(opId);
+      },
+      wait: () => promise,
+    };
+
+    return handle;
+  });
 }
 
 export function stopMonitor(operationId: string): boolean {

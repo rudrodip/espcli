@@ -1,42 +1,36 @@
-import type { CleanConfig, Result } from '@/core/types';
+import type { CleanConfig } from '@/core/types';
+import { ResultAsync, err } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { emitter, createOperationId } from '@/core/emitter';
 import { runWithIdf } from '@/core/services/process';
 import { isIdfProject } from '@/core/services/idf';
 
-export async function clean(
-  config: CleanConfig,
-  operationId?: string
-): Promise<Result<void>> {
+export function clean(config: CleanConfig, operationId?: string): ResultAsync<void, AppError> {
   const opId = operationId || createOperationId();
   const { projectDir, full } = config;
 
-  const isProject = await isIdfProject(projectDir);
-  if (!isProject) {
-    const error = 'Not an ESP-IDF project directory';
-    emitter.emit(opId, { type: 'error', message: error });
-    return { ok: false, error };
-  }
+  return isIdfProject(projectDir).andThen((isProject) => {
+    if (!isProject) {
+      const error = AppError.notIdfProject(projectDir);
+      emitter.emit(opId, { type: 'error', message: error.message });
+      return err(error);
+    }
 
-  const command = full ? 'fullclean' : 'clean';
-  emitter.emit(opId, { type: 'progress', message: `Running ${command}...` });
+    const command = full ? 'fullclean' : 'clean';
+    emitter.emit(opId, { type: 'progress', message: `Running ${command}...` });
 
-  const result = await runWithIdf('idf.py', [command], {
-    cwd: projectDir,
-    operationId: opId,
+    return runWithIdf('idf.py', [command], {
+      cwd: projectDir,
+      operationId: opId,
+    }).andThen((result) => {
+      if (result.exitCode !== 0) {
+        const error = AppError.commandFailed('idf.py', `${command} failed`);
+        emitter.emit(opId, { type: 'error', message: error.message });
+        return err(error);
+      }
+
+      emitter.emit(opId, { type: 'complete', result: null });
+      return ResultAsync.fromSafePromise(Promise.resolve(undefined));
+    });
   });
-
-  if (!result.ok) {
-    emitter.emit(opId, { type: 'error', message: result.error });
-    return { ok: false, error: result.error };
-  }
-
-  if (result.data.exitCode !== 0) {
-    const error = `${command} failed`;
-    emitter.emit(opId, { type: 'error', message: error });
-    return { ok: false, error };
-  }
-
-  emitter.emit(opId, { type: 'complete', result: null });
-
-  return { ok: true, data: undefined };
 }

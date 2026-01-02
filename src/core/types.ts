@@ -1,6 +1,10 @@
-export type Result<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; code?: string };
+import { Result, ResultAsync, ok, err } from 'neverthrow';
+import type { AppError } from '@/core/errors';
+
+export { Result, ResultAsync, ok, err };
+
+export type AppResult<T> = Result<T, AppError>;
+export type AppResultAsync<T> = ResultAsync<T, AppError>;
 
 export type ShellType = 'zsh' | 'bash' | 'fish' | 'unknown';
 

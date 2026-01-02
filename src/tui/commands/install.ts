@@ -15,7 +15,9 @@ interface InstallOptions {
 export async function installCommand(options: InstallOptions): Promise<void> {
   prompts.intro('ESP-IDF Installation');
 
-  const status = await getIdfStatus();
+  const statusResult = await getIdfStatus();
+  // getIdfStatus never fails (ResultAsync<IdfStatus, never>)
+  const status = statusResult._unsafeUnwrap();
 
   if (status.installed) {
     logger.info(`ESP-IDF already installed at ${status.path}`);
@@ -73,14 +75,15 @@ export async function installCommand(options: InstallOptions): Promise<void> {
 
   spin.stop();
 
-  if (!result.ok) {
-    logger.error(result.error);
+  if (result.isErr()) {
+    logger.error(result.error.message);
     process.exit(1);
   }
 
-  logger.success(`ESP-IDF installed at ${result.data.idfPath}`);
+  const data = result.value;
+  logger.success(`ESP-IDF installed at ${data.idfPath}`);
 
-  if (result.data.addedToShell) {
+  if (data.addedToShell) {
     logger.info(`Added to ${shellInfo.configPath}`);
     logger.dim('Restart your shell or run: source ' + shellInfo.configPath);
   }

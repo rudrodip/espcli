@@ -1,4 +1,6 @@
-import type { FlashConfig, Result } from '@/core/types';
+import type { FlashConfig } from '@/core/types';
+import { ResultAsync, ok, err } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { emitter, createOperationId } from '@/core/emitter';
 import { runWithIdf } from '@/core/services/process';
 import { isIdfProject } from '@/core/services/idf';
@@ -9,41 +11,34 @@ export interface FlashResult {
   port: string;
 }
 
-export async function flash(
-  config: FlashConfig,
-  operationId?: string
-): Promise<Result<FlashResult>> {
+export function flash(config: FlashConfig, operationId?: string): ResultAsync<FlashResult, AppError> {
   const opId = operationId || createOperationId();
   const { projectDir, port, baud = DEFAULT_FLASH_BAUD } = config;
 
-  const isProject = await isIdfProject(projectDir);
-  if (!isProject) {
-    const error = 'Not an ESP-IDF project directory';
-    emitter.emit(opId, { type: 'error', message: error });
-    return { ok: false, error };
-  }
+  return isIdfProject(projectDir).andThen((isProject) => {
+    if (!isProject) {
+      const error = AppError.notIdfProject(projectDir);
+      emitter.emit(opId, { type: 'error', message: error.message });
+      return err(error);
+    }
 
-  emitter.emit(opId, { type: 'progress', message: `Flashing to ${port}...` });
+    emitter.emit(opId, { type: 'progress', message: `Flashing to ${port}...` });
 
-  const args = ['-p', port, '-b', String(baud), 'flash'];
+    const args = ['-p', port, '-b', String(baud), 'flash'];
 
-  const flashResult = await runWithIdf('idf.py', args, {
-    cwd: projectDir,
-    operationId: opId,
+    return runWithIdf('idf.py', args, {
+      cwd: projectDir,
+      operationId: opId,
+    }).andThen((result) => {
+      if (result.exitCode !== 0) {
+        const error = AppError.flashFailed('Flash failed');
+        emitter.emit(opId, { type: 'error', message: error.message });
+        return err(error);
+      }
+
+      const flashResult = { success: true, port };
+      emitter.emit(opId, { type: 'complete', result: flashResult });
+      return ok(flashResult);
+    });
   });
-
-  if (!flashResult.ok) {
-    emitter.emit(opId, { type: 'error', message: flashResult.error });
-    return { ok: false, error: flashResult.error };
-  }
-
-  if (flashResult.data.exitCode !== 0) {
-    const error = 'Flash failed';
-    emitter.emit(opId, { type: 'error', message: error });
-    return { ok: false, error };
-  }
-
-  emitter.emit(opId, { type: 'complete', result: { success: true, port } });
-
-  return { ok: true, data: { success: true, port } };
 }

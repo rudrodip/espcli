@@ -3,12 +3,14 @@ import { spawnWithIdf } from '@/core/services/process';
 import { logger } from '@/tui/logger';
 
 export async function menuconfigCommand(): Promise<void> {
-  const projectDir = await findProjectRoot(process.cwd());
+  const projectResult = await findProjectRoot(process.cwd());
 
-  if (!projectDir) {
+  if (projectResult.isErr()) {
     logger.error('Not in an ESP-IDF project directory');
     process.exit(1);
   }
+
+  const projectDir = projectResult.value;
 
   logger.step('Opening menuconfig...');
 
@@ -17,10 +19,10 @@ export async function menuconfigCommand(): Promise<void> {
     interactive: true,
   });
 
-  if (!result) {
+  if (result.isErr()) {
     logger.error('ESP-IDF not found. Run `espcli install` first.');
     process.exit(1);
   }
 
-  await result.promise;
+  await result.value.promise;
 }

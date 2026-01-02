@@ -1,4 +1,6 @@
-import type { InitConfig, InitResult, Result, TemplateFile } from '@/core/types';
+import type { InitConfig, InitResult, TemplateFile } from '@/core/types';
+import { ResultAsync, ok, err } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import type { ProjectConfig } from '@/core/services/config';
 import { CONFIG_FILENAME } from '@/core/services/config';
 import { DEFAULT_FLASH_BAUD, DEFAULT_MONITOR_BAUD } from '@/core/constants';
@@ -39,30 +41,28 @@ export function generateProjectFiles(config: InitConfig): TemplateFile[] {
   ];
 }
 
-export async function createProject(config: InitConfig): Promise<Result<InitResult>> {
+export function createProject(config: InitConfig): ResultAsync<InitResult, AppError> {
   const projectPath = join(config.directory, config.name);
   const files = generateProjectFiles(config);
 
-  try {
-    await mkdir(join(projectPath, 'main'), { recursive: true });
-    await mkdir(join(projectPath, '.vscode'), { recursive: true });
+  return ResultAsync.fromPromise(
+    (async () => {
+      await mkdir(join(projectPath, 'main'), { recursive: true });
+      await mkdir(join(projectPath, '.vscode'), { recursive: true });
 
-    const createdFiles: string[] = [];
+      const createdFiles: string[] = [];
 
-    for (const file of files) {
-      const filePath = join(projectPath, file.path);
-      await writeFile(filePath, file.content);
-      createdFiles.push(file.path);
-    }
+      for (const file of files) {
+        const filePath = join(projectPath, file.path);
+        await writeFile(filePath, file.content);
+        createdFiles.push(file.path);
+      }
 
-    return {
-      ok: true,
-      data: {
+      return {
         projectPath,
         files: createdFiles,
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: `Failed to create project: ${err}` };
-  }
+      };
+    })(),
+    (e) => AppError.fileWriteFailed(projectPath, e instanceof Error ? e : undefined)
+  );
 }

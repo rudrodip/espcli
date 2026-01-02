@@ -1,11 +1,8 @@
-import type { SerialDevice, Result } from '@/core/types';
+import type { SerialDevice } from '@/core/types';
+import { ResultAsync } from 'neverthrow';
+import type { AppError } from '@/core/errors';
 import { listPorts } from '@/core/services/ports';
 
-export async function listDevices(): Promise<Result<SerialDevice[]>> {
-  try {
-    const devices = await listPorts();
-    return { ok: true, data: devices };
-  } catch (err) {
-    return { ok: false, error: `Failed to list devices: ${err}` };
-  }
+export function listDevices(): ResultAsync<SerialDevice[], AppError> {
+  return listPorts();
 }

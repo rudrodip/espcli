@@ -7,7 +7,9 @@ export async function doctorCommand(): Promise<void> {
   logger.info('Checking system health...');
   logger.newline();
 
-  const health = await getHealth();
+  const healthResult = await getHealth();
+  // getHealth never fails (ResultAsync<SystemHealth, never>)
+  const health = healthResult._unsafeUnwrap();
 
   // Display each check
   displayStatus(health.python);
@@ -52,19 +54,22 @@ function displayStatus(status: HealthStatus): void {
 async function checkDevices(): Promise<void> {
   console.log(pc.bold('  Devices:'));
 
-  try {
-    const devices = await listPorts();
+  const result = await listPorts();
 
-    if (devices.length === 0) {
-      console.log(`    ${pc.dim('No ESP devices connected')}`);
-    } else {
-      for (const device of devices) {
-        const chip = device.espChip || device.chip || 'Unknown';
-        const type = device.connectionType === 'native-usb' ? 'USB' : 'UART';
-        console.log(`    ${pc.green('•')} ${device.port} ${pc.dim(`(${chip} via ${type})`)}`);
-      }
-    }
-  } catch {
+  if (result.isErr()) {
     console.log(`    ${pc.dim('Could not check devices')}`);
+    return;
+  }
+
+  const devices = result.value;
+
+  if (devices.length === 0) {
+    console.log(`    ${pc.dim('No ESP devices connected')}`);
+  } else {
+    for (const device of devices) {
+      const chip = device.espChip || device.chip || 'Unknown';
+      const type = device.connectionType === 'native-usb' ? 'USB' : 'UART';
+      console.log(`    ${pc.green('•')} ${device.port} ${pc.dim(`(${chip} via ${type})`)}`);
+    }
   }
 }

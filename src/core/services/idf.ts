@@ -1,98 +1,89 @@
-import type { IdfStatus, Result } from '@/core/types';
+import type { IdfStatus } from '@/core/types';
+import { ResultAsync, ok } from 'neverthrow';
+import { AppError, toAppError } from '@/core/errors';
 import { DEFAULT_IDF_PATH } from '@/core/constants';
 import { access, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { execa } from 'execa';
 
-export async function findIdfPath(): Promise<string | null> {
-  if (process.env.IDF_PATH) {
-    try {
-      await access(process.env.IDF_PATH);
-      return process.env.IDF_PATH;
-    } catch {}
-  }
+export function findIdfPath(): ResultAsync<string, AppError> {
+  const possiblePaths = [process.env.IDF_PATH, DEFAULT_IDF_PATH].filter(Boolean) as string[];
 
-  try {
-    await access(DEFAULT_IDF_PATH);
-    return DEFAULT_IDF_PATH;
-  } catch {}
-
-  return null;
+  return ResultAsync.fromSafePromise(
+    (async () => {
+      for (const path of possiblePaths) {
+        try {
+          await access(path);
+          return path;
+        } catch {
+          continue;
+        }
+      }
+      throw AppError.idfNotFound();
+    })()
+  ).mapErr((e) => toAppError(e, 'IDF_NOT_FOUND'));
 }
 
-export async function getIdfVersion(idfPath: string): Promise<string | null> {
+export function getIdfVersion(idfPath: string): ResultAsync<string, AppError> {
   const versionFile = join(idfPath, 'version.txt');
 
-  try {
-    const content = await readFile(versionFile, 'utf-8');
-    return content.trim();
-  } catch {}
-
-  try {
-    const result = await execa('git', ['describe', '--tags'], { cwd: idfPath });
-    return result.stdout.trim();
-  } catch {}
-
-  return null;
+  return ResultAsync.fromPromise(readFile(versionFile, 'utf-8'), () => AppError.fileReadFailed(versionFile))
+    .map((content) => content.trim())
+    .orElse(() =>
+      ResultAsync.fromPromise(
+        execa('git', ['describe', '--tags'], { cwd: idfPath }).then((r) => r.stdout.trim()),
+        () => AppError.commandFailed('git', 'Failed to get IDF version from git')
+      )
+    );
 }
 
-export async function getIdfStatus(): Promise<IdfStatus> {
-  const path = await findIdfPath();
-
-  if (!path) {
-    return { installed: false };
-  }
-
-  const version = await getIdfVersion(path);
-
-  return {
-    installed: true,
-    path,
-    version: version || undefined,
-  };
+export function getIdfStatus(): ResultAsync<IdfStatus, never> {
+  return findIdfPath()
+    .andThen((path) =>
+      getIdfVersion(path)
+        .map((version) => ({ installed: true, path, version }) as IdfStatus)
+        .orElse(() => ok({ installed: true, path, version: undefined } as IdfStatus))
+    )
+    .orElse(() => ok({ installed: false } as IdfStatus));
 }
 
-export async function isIdfProject(dir: string): Promise<boolean> {
+export function isIdfProject(dir: string): ResultAsync<boolean, AppError> {
   const cmakePath = join(dir, 'CMakeLists.txt');
 
-  try {
-    const content = await readFile(cmakePath, 'utf-8');
-    return content.includes('$ENV{IDF_PATH}') || content.includes('idf_component_register');
-  } catch {
-    return false;
-  }
+  return ResultAsync.fromPromise(readFile(cmakePath, 'utf-8'), () => AppError.fileNotFound(cmakePath))
+    .map((content) => content.includes('$ENV{IDF_PATH}') || content.includes('idf_component_register'))
+    .orElse(() => ok(false));
 }
 
-export async function findProjectRoot(startDir: string): Promise<string | null> {
-  let current = startDir;
+export function findProjectRoot(startDir: string): ResultAsync<string, AppError> {
+  return ResultAsync.fromSafePromise(
+    (async () => {
+      let current = startDir;
 
-  while (current !== dirname(current)) {
-    if (await isIdfProject(current)) {
-      return current;
-    }
-    current = dirname(current);
-  }
+      while (current !== dirname(current)) {
+        const result = await isIdfProject(current);
+        if (result.isOk() && result.value) {
+          return current;
+        }
+        current = dirname(current);
+      }
 
-  return null;
+      throw AppError.notIdfProject(startDir);
+    })()
+  ).mapErr((e) => toAppError(e, 'NOT_IDF_PROJECT'));
 }
 
 export function getExportScript(idfPath: string): string {
   return join(idfPath, 'export.sh');
 }
 
-export async function validateIdfInstallation(idfPath: string): Promise<Result<void>> {
-  try {
-    await access(idfPath);
-  } catch {
-    return { ok: false, error: `IDF path does not exist: ${idfPath}` };
-  }
-
-  const exportScript = getExportScript(idfPath);
-  try {
-    await access(exportScript);
-  } catch {
-    return { ok: false, error: `export.sh not found in ${idfPath}` };
-  }
-
-  return { ok: true, data: undefined };
+export function validateIdfInstallation(idfPath: string): ResultAsync<void, AppError> {
+  return ResultAsync.fromPromise(access(idfPath), () =>
+    AppError.idfValidationFailed(`IDF path does not exist: ${idfPath}`)
+  ).andThen(() => {
+    const exportScript = getExportScript(idfPath);
+    return ResultAsync.fromPromise(access(exportScript), () =>
+      AppError.idfValidationFailed(`export.sh not found in ${idfPath}`)
+    ).map(() => undefined);
+  });
 }

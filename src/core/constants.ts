@@ -119,4 +119,4 @@ export const SHELL_CONFIGS: Record<string, string> = {
   fish: '.config/fish/config.fish',
 };
 
-export const VERSION = '0.0.7';
+export const VERSION = '0.1.0';

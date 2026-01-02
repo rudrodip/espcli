@@ -43,15 +43,16 @@ export async function initCommand(name: string | undefined, options: InitOptions
 
   spin.stop();
 
-  if (!result.ok) {
-    logger.error(result.error);
+  if (result.isErr()) {
+    logger.error(result.error.message);
     process.exit(1);
   }
 
-  logger.success(`Created project at ${result.data.projectPath}`);
+  const data = result.value;
+  logger.success(`Created project at ${data.projectPath}`);
   logger.newline();
   logger.dim('Files created:');
-  result.data.files.forEach((f) => logger.dim(`  ${f}`));
+  data.files.forEach((f) => logger.dim(`  ${f}`));
   logger.newline();
   logger.info(`cd ${projectName} && espcli build`);
 

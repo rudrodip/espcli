@@ -1,4 +1,6 @@
-import type { ShellInfo, ShellType, Result } from '@/core/types';
+import type { ShellInfo, ShellType } from '@/core/types';
+import { ResultAsync, ok, err } from 'neverthrow';
+import { AppError } from '@/core/errors';
 import { SHELL_CONFIGS } from '@/core/constants';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -20,48 +22,54 @@ export function getShellInfo(): ShellInfo {
   return { type, configPath };
 }
 
-export async function shellConfigExists(): Promise<boolean> {
+export function shellConfigExists(): ResultAsync<boolean, AppError> {
   const { configPath } = getShellInfo();
-  if (!configPath) return false;
 
-  try {
-    await access(configPath);
-    return true;
-  } catch {
-    return false;
+  if (!configPath) {
+    return ResultAsync.fromSafePromise(Promise.resolve(false));
   }
+
+  return ResultAsync.fromPromise(
+    access(configPath).then(() => true),
+    () => AppError.fileNotFound(configPath)
+  ).orElse(() => ok(false));
 }
 
-export async function isLineInShellConfig(line: string): Promise<boolean> {
+export function isLineInShellConfig(line: string): ResultAsync<boolean, AppError> {
   const { configPath } = getShellInfo();
-  if (!configPath) return false;
 
-  try {
-    const content = await readFile(configPath, 'utf-8');
-    return content.includes(line);
-  } catch {
-    return false;
+  if (!configPath) {
+    return ResultAsync.fromSafePromise(Promise.resolve(false));
   }
+
+  return ResultAsync.fromPromise(
+    readFile(configPath, 'utf-8'),
+    () => AppError.fileReadFailed(configPath)
+  )
+    .map((content) => content.includes(line))
+    .orElse(() => ok(false));
 }
 
-export async function addToShellConfig(line: string): Promise<Result<void>> {
+export function addToShellConfig(line: string): ResultAsync<void, AppError> {
   const { configPath, type } = getShellInfo();
 
   if (!configPath) {
-    return { ok: false, error: `Unsupported shell: ${type}` };
+    return ResultAsync.fromPromise(
+      Promise.reject(AppError.shellUnsupported(type)),
+      (e) => e as AppError
+    );
   }
 
-  const alreadyExists = await isLineInShellConfig(line);
-  if (alreadyExists) {
-    return { ok: true, data: undefined };
-  }
+  return isLineInShellConfig(line).andThen((exists) => {
+    if (exists) {
+      return ResultAsync.fromSafePromise(Promise.resolve(undefined));
+    }
 
-  try {
-    await appendFile(configPath, `\n${line}\n`);
-    return { ok: true, data: undefined };
-  } catch (err) {
-    return { ok: false, error: `Failed to modify ${configPath}: ${err}` };
-  }
+    return ResultAsync.fromPromise(
+      appendFile(configPath, `\n${line}\n`),
+      (e) => AppError.shellConfigFailed(configPath, e instanceof Error ? e : undefined)
+    );
+  });
 }
 
 export function getExportCommand(idfPath: string): string {
