@@ -1,21 +1,21 @@
 {
   "name": "espcli",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Modern CLI for ESP-IDF development — install, create, build, flash, and monitor ESP32 projects",
-  "module": "src/index.ts",
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
     "serve": "bun run src/serve.ts",
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun --minify",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --minify",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "web": "cd web && bun run dev",
     "web:install": "cd web && bun install",
-    "web:build": "cd web && bun run build"
+    "web:build": "cd web && bun run build",
+    "publish": "bun run build && bun publish --access public"
   },
   "bin": {
-    "espcli": "./src/index.ts"
+    "espcli": "./dist/index.js"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -23,8 +23,8 @@
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
+  "types": "dist/index.d.ts",
   "files": [
-    "src",
     "dist"
   ],
   "repository": {
