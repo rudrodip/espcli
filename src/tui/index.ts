@@ -9,6 +9,8 @@ import { monitorCommand } from '@/tui/commands/monitor';
 import { cleanCommand } from '@/tui/commands/clean';
 import { runCommand } from '@/tui/commands/run';
 import { doctorCommand } from '@/tui/commands/doctor';
+import { sourceCommand } from '@/tui/commands/source';
+import { menuconfigCommand } from '@/tui/commands/menuconfig';
 // import { createServer } from '@/server';
 
 export function createCli(): Command {
@@ -91,6 +93,17 @@ export function createCli(): Command {
     .alias('check')
     .description('Check system health and dependencies')
     .action(doctorCommand);
+
+  program
+    .command('source')
+    .alias('env')
+    .description('Show command to add idf.py to current terminal')
+    .action(sourceCommand);
+
+  program
+    .command('menuconfig')
+    .description('Open ESP-IDF menuconfig')
+    .action(menuconfigCommand);
 
   return program;
 }

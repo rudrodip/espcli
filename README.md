@@ -91,6 +91,8 @@ espcli monitor
 | `run` | Build, flash, and monitor |
 | `clean` | Clean build artifacts |
 | `doctor` | Check system health |
+| `source` | Show command to add idf.py to current terminal |
+| `menuconfig` | Open ESP-IDF menuconfig (interactive configuration) |
 
 ### Command Options
 
